@@ -8,8 +8,8 @@ open_kwds = {}
 if sys.version_info > (3,):
     open_kwds["encoding"] = "utf-8"
 
-#with open("README.rst", **open_kwds) as f:
-    #readme = f.read()
+with open("README.md", "r") as fh:
+    long_description = fh.read()
 
 setup(
     name="iterlib",
