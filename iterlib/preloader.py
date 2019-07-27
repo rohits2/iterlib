@@ -3,7 +3,7 @@ from multiprocessing import Process, Queue, Lock
 
 from typing import Iterator
 
-TERMINATION_OBJECT = {"END NOW"}
+SENTINEL = "ITERLIB_PRELOADER_SENTINEL"
 
 class Preloader:
     def __init__(self, input_iter: Iterator, max_buf=4, verbose=False, mode="thread"):
@@ -23,7 +23,7 @@ class Preloader:
     def __work(self):
         for item in self.__in_iter:
             self.__out_queue.put(item)
-        self.__out_queue.put(TERMINATION_OBJECT)
+        self.__out_queue.put(SENTINEL)
 
     def __iter__(self):
         return self
@@ -33,7 +33,7 @@ class Preloader:
             if self.__done:
                 raise StopIteration()
             rv = self.__out_queue.get()
-            if rv is TERMINATION_OBJECT:
+            if rv == SENTINEL:
                 self.__done = True
                 raise StopIteration()
             return rv
