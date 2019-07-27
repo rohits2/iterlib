@@ -1,0 +1,4 @@
+.vscode
+iterlib.egg-info
+*.pyc
+.pytest_cache
