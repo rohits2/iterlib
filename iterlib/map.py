@@ -121,6 +121,7 @@ class GeneratorStream:
             self.__workers[-1].start()
 
         self.__distributor = executor(target=self.__distribute)
+        self.__distributor.start()
 
         self.__read_lock = Lock()
         self.__done = False
