@@ -31,7 +31,10 @@ class Preloader:
             self.__out_queue = PicklingQueue(max_buf)
             self.__worker = Process(target=self.__work)
             self.__worker.start()
+        else:
+            raise ValueError("Expected either 'thread' or 'process' - you chose %s" % mode)
 
+    @logger.catch
     def __work(self):
         for item in self.__in_iter:
             self.__out_queue.put(item)
