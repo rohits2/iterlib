@@ -13,9 +13,9 @@ with open("README.md", "r") as fh:
 
 setup(
     name="iterlib",
-    version="1.1.1",
+    version="1.1.2",
     description="Parallel and concurrent iterators",
-    #long_description=readme,
+    long_description=long_description,
     classifiers=[
         "Programming Language :: Python :: 3",
     ],
