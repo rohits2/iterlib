@@ -238,7 +238,7 @@ class GeneratorMapStream:
 
 
 
-def thread_map(func, *iters, num_workers=4, buffer_size=16, verbose=False):
+def thread_map(func, *iters, num_workers=2, buffer_size=3, verbose=False):
     """
     Map `func` over `iters` using `num_workers` threads.
     Specify `buffer_size` to control how much data each worker will store before waiting for values to be consumed from the map.
@@ -257,7 +257,7 @@ def thread_map(func, *iters, num_workers=4, buffer_size=16, verbose=False):
         return GeneratorMapStream(func, *iters, mode="thread", num_workers=num_workers, buffer_size=buffer_size, verbose=verbose)
 
 
-def process_map(func, *iters, num_workers=4, buffer_size=16, verbose=False):
+def process_map(func, *iters, num_workers=4, buffer_size=1, verbose=False):
     """
     Map `func` over `iters` using `num_workers` processes.
     Specify `buffer_size` to control how much data each worker will store before waiting for values to be consumed from the map.
