@@ -8,7 +8,7 @@ from loguru import logger
 SENTINEL = "ITERLIB_STREAMING_MAP_SENTINEL"
 
 
-class IndexedStream:
+class IndexedMapStream:
     def __init__(self, func, *iters, mode="thread", num_workers=4, buffer_size=16, verbose=False):
         """
         A parallel map operating on indexable objects.
@@ -69,6 +69,11 @@ class IndexedStream:
         if self.__verbose:
             logger.debug("Worker %s is shutting down" % mod)
         queue.put(SENTINEL)
+    
+    def __del__(self):
+        for worker in self.__workers:
+            worker.terminate()
+            worker.join()
 
     def __len__(self):
         return self.__length
@@ -126,7 +131,7 @@ class IndexedMap:
         return self.__func(*[it[i] for it in self.__iters])
 
     def __iter__(self):
-        return IndexedStream(
+        return IndexedMapStream(
             self.__func,
             *self.__iters,
             mode=self.__mode,
@@ -134,7 +139,7 @@ class IndexedMap:
             buffer_size=self.__buffer_size,
             verbose=self.__verbose)
 
-class GeneratorStream:
+class GeneratorMapStream:
     def __init__(self, func, *iters, mode="thread", num_workers=4, buffer_size=16, verbose=False):
         """
         A parallel map operating on non-indexable generators.
@@ -198,6 +203,7 @@ class GeneratorStream:
             logger.debug("Worker %s is shutting down" % mod)
         out_queue.put(SENTINEL)
     
+
     def __distribute(self):
         for i, vals in enumerate(zip(*self.__iters)):
             queue_i = i % self.__num_workers
@@ -205,6 +211,11 @@ class GeneratorStream:
         for i in range(self.__num_workers):
             self.__input_queues[queue_i].put(SENTINEL)
             self.__input_queues[queue_i].put(SENTINEL)
+
+    def __del__(self):
+        for worker in self.__workers:
+            worker.terminate()
+            worker.join()
 
     def __iter__(self):
         return self
@@ -242,7 +253,7 @@ def thread_map(func, *iters, num_workers=4, buffer_size=16, verbose=False):
     if use_indexing:
         return IndexedMap(func, *iters, mode="thread", num_workers=num_workers, buffer_size=16, verbose=verbose)
     else:
-        return GeneratorStream(func, *iters, mode="thread", num_workers=num_workers, buffer_size=buffer_size, verbose=verbose)
+        return GeneratorMapStream(func, *iters, mode="thread", num_workers=num_workers, buffer_size=buffer_size, verbose=verbose)
 
 
 def process_map(func, *iters, num_workers=4, buffer_size=16, verbose=False):
@@ -260,4 +271,4 @@ def process_map(func, *iters, num_workers=4, buffer_size=16, verbose=False):
     if use_indexing:
         return IndexedMap(func, *iters, mode="process", num_workers=num_workers, buffer_size=16, verbose=verbose)
     else:
-        return GeneratorStream(func, *iters, mode="process", num_workers=num_workers, buffer_size=buffer_size, verbose=verbose)
+        return GeneratorMapStream(func, *iters, mode="process", num_workers=num_workers, buffer_size=buffer_size, verbose=verbose)
