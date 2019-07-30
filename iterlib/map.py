@@ -10,6 +10,17 @@ SENTINEL = "ITERLIB_STREAMING_MAP_SENTINEL"
 
 class IndexedStream:
     def __init__(self, func, *iters, mode="thread", num_workers=4, buffer_size=16, verbose=False):
+        """
+        A parallel map operating on indexable objects.
+        Specify `mode` to determine whether the map will use processes or threads.
+
+        This will start `num_workers` workers and use the object's __getitem__ to distribute work.
+
+        Every other worker will store `buffer_size` completed results.  
+        Once they have that many completed results, they will stall until data is pulled from this object.
+
+        Specifying `verbose=True` will print potentially useful timing and diagnostic information.
+        """
         assert buffer_size >= 1, "Buffer size must be greater than or equal to 1!"
         assert num_workers >= 1, "Num workers must be greater than or equal to 1!"
 
@@ -83,6 +94,14 @@ class IndexedStream:
 
 class IndexedMap:
     def __init__(self, func, *iters, mode="thread", num_workers=4, buffer_size=16, verbose=False):
+        """
+        Map `func` over `iters`, where each item in `iters` supports indexing.
+        This map will also support indexing, and index queries will lazy evaluate the map.
+
+        Calling `iter()` on this object will return an `IndexedStream` created with the remaining parameters.
+        Subsequent calls to `iter()` **will return new `IndexedStream`s**.
+        This behavior is substantially different than the builtin `map()`.
+        """
         assert buffer_size >= 1, "Buffer size must be greater than or equal to 1!"
         assert num_workers >= 1, "Num workers must be greater than or equal to 1!"
 
@@ -117,6 +136,18 @@ class IndexedMap:
 
 class GeneratorStream:
     def __init__(self, func, *iters, mode="thread", num_workers=4, buffer_size=16, verbose=False):
+        """
+        A parallel map operating on non-indexable generators.
+        Specify `mode` to determine whether the map will use processes or threads.
+
+        This will start `num_workers + 1` workers - one worker is necessary to distribute work because the iterables
+        may not be indexable.
+
+        Every other worker will store `buffer_size` completed results.  
+        Once they have that many completed results, they will stall until data is pulled from this object.
+
+        Specifying `verbose=True` will print potentially useful timing and diagnostic information.
+        """
         assert buffer_size >= 1, "Buffer size must be greater than or equal to 1!"
         assert num_workers >= 1, "Num workers must be greater than or equal to 1!"
 
@@ -195,6 +226,14 @@ class GeneratorStream:
 
 
 def thread_map(func, *iters, num_workers=4, buffer_size=16, verbose=False):
+    """
+    Map `func` over `iters` using `num_workers` threads.
+    Specify `buffer_size` to control how much data each worker will store before waiting for values to be consumed from the map.
+    If `verbose` is True, the map will print diagnostic information.
+
+    Because this function uses threads, the function and iterables do NOT need to be picklable.
+    However, the GIL will still prevent python code from running in parallel.
+    """
     use_indexing = True
     for itr in iters:
         use_indexing = use_indexing and hasattr(itr, "__getitem__")
@@ -206,6 +245,13 @@ def thread_map(func, *iters, num_workers=4, buffer_size=16, verbose=False):
 
 
 def process_map(func, *iters, num_workers=4, buffer_size=16, verbose=False):
+    """
+    Map `func` over `iters` using `num_workers` processes.
+    Specify `buffer_size` to control how much data each worker will store before waiting for values to be consumed from the map.
+    If `verbose` is True, the map will print diagnostic information.
+
+    Because this map uses multiprocessing, both the function and the iterables must be picklable.
+    """
     use_indexing = True
     for itr in iters:
         use_indexing = use_indexing and hasattr(itr, "__getitem__")

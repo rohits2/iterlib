@@ -9,6 +9,15 @@ SENTINEL = "ITERLIB_PRELOADER_SENTINEL"
 
 class Preloader:
     def __init__(self, input_iter: Iterator, max_buf=4, verbose=False, mode="thread"):
+        """
+        Preloads an iterator in the background so that queries to it return quickly.
+        Specify `max_buf` to control the maximum number of values to preload.
+        Specify `mode` to control whether or not the background loading happens in 
+        a thread or in a process.
+
+        Be aware that if it happens in a process, objects must be pickable.
+        If it occurs in a thread, the Python GIL will apply.
+        """
         assert max_buf >= 1, "Buffer size must be greater than or equal to 1!"
         self.__in_iter = iter(input_iter)
         self.__done = False
@@ -58,6 +67,8 @@ def thread_preload(itr, max_buf=4):
 def process_preload(itr, max_buf=4):
     """
     Load an iterator in the background in a different process.
+
+    Be aware that the iterator and items in it must be pickable.
 
     Set max_buf to control how far in advance the iterator will preload.
     """
