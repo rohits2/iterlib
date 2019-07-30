@@ -28,3 +28,10 @@ def test_thread_preload_pickle():
         assert orig.func1(TEST_VAL) == mapped.func1(TEST_VAL)
         assert orig.func2(TEST_VAL) == mapped.func2(TEST_VAL)
 
+@pytest.mark.timeout(10)
+def test_process_imap_pickle():
+    objs = [random.randint(0, 1000) for _ in range(100)]
+    unpicklable_objs_iterator = iterlib.thread_preload(objs)
+    identity_map_objs = iterlib.process_map(lambda x: x, unpicklable_objs_iterator)
+    for orig, mapped in zip(objs, identity_map_objs):
+        assert orig == mapped
