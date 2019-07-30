@@ -5,6 +5,8 @@ from queue import Queue
 
 from typing import Iterator
 
+from loguru import logger
+
 SENTINEL = "ITERLIB_PRELOADER_SENTINEL"
 
 class Preloader:

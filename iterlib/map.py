@@ -3,6 +3,7 @@ from multiprocessing import cpu_count, Lock, Manager, Process
 from multiprocessing import Queue as PicklingQueue
 from queue import Queue
 from threading import Thread
+
 from loguru import logger
 
 SENTINEL = "ITERLIB_STREAMING_MAP_SENTINEL"
