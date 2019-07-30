@@ -50,7 +50,7 @@ class IndexedMapStream:
         self.__done = False
         self.__i = 0
 
-
+    @logger.catch
     def __work(self, mod):
         if self.__verbose:
             logger.debug("Worker %s is starting" % mod)
@@ -186,7 +186,7 @@ class GeneratorMapStream:
         self.__done = False
         self.__i = 0
 
-
+    @logger.catch
     def __work(self, mod):
         if self.__verbose:
             logger.debug("Worker %s is starting" % mod)
@@ -203,7 +203,7 @@ class GeneratorMapStream:
             logger.debug("Worker %s is shutting down" % mod)
         out_queue.put(SENTINEL)
     
-
+    @logger.catch
     def __distribute(self):
         for i, vals in enumerate(zip(*self.__iters)):
             queue_i = i % self.__num_workers
