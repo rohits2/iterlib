@@ -49,6 +49,7 @@ class IndexedMapStream:
 
         self.__read_lock = Lock()
         self.__done = False
+        self.__terminated = False
         self.__i = 0
 
     @logger.catch
@@ -71,10 +72,14 @@ class IndexedMapStream:
             logger.debug("Worker %s is shutting down" % mod)
         queue.put(SENTINEL)
     
-    def __del__(self):
+    def __cleanup(self):
         for worker in self.__workers:
-            worker.terminate()
             worker.join()
+        self.__terminated = True
+    
+    def is_shutdown(self):
+        with self.__read_lock:
+            return self.__terminated
 
     def __len__(self):
         return self.__length
@@ -92,6 +97,7 @@ class IndexedMapStream:
             rv = self.__worker_queues[queue_i].get()
             if type(rv) == type(SENTINEL) and rv == SENTINEL:
                 logger.debug("Detected termination object in subqueue %s, ending iteration")
+                self.__cleanup()
                 self.__done = True
                 raise StopIteration()
             self.__i += 1
@@ -185,6 +191,7 @@ class GeneratorMapStream:
 
         self.__read_lock = Lock()
         self.__done = False
+        self.__terminated = False
         self.__i = 0
 
     @logger.catch
@@ -213,10 +220,14 @@ class GeneratorMapStream:
             self.__input_queues[queue_i].put(SENTINEL)
             self.__input_queues[queue_i].put(SENTINEL)
 
-    def __del__(self):
+    def __cleanup(self):
         for worker in self.__workers:
-            worker.terminate()
             worker.join()
+        self.__terminated = True
+
+    def is_shutdown(self):
+        with self.__read_lock:
+            return self.__terminated
 
     def __iter__(self):
         return self
@@ -231,6 +242,7 @@ class GeneratorMapStream:
             rv = self.__worker_queues[queue_i].get()
             if type(rv) == type(SENTINEL) and rv == SENTINEL:
                 logger.debug("Detected termination object in subqueue %s, ending iteration")
+                self.__cleanup()
                 self.__done = True
                 raise StopIteration()
             self.__i += 1

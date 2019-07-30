@@ -20,9 +20,10 @@ class Preloader:
         Be aware that if it happens in a process, objects must be pickable.
         If it occurs in a thread, the Python GIL will apply.
         """
-        assert max_buf >= 1, "Buffer size must be greater than or equal to 1!"
+        assert buffer_size >= 1, "Buffer size must be greater than or equal to 1!"
         self.__in_iter = iter(input_iter)
         self.__done = False
+        self.__terminated = False
         self.__read_lock = Lock()
         self.__verbose = verbose
         if mode == "thread":
@@ -44,6 +45,14 @@ class Preloader:
 
     def __iter__(self):
         return self
+    
+    def __cleanup(self):
+        self.__worker.join()
+        self.__terminated = True
+    
+    def is_shutdown(self):
+        with self.__read_lock:
+            return self.__terminated
 
     def __next__(self):
         with self.__read_lock:
@@ -52,6 +61,7 @@ class Preloader:
             rv = self.__out_queue.get()
             if type(rv) == type(SENTINEL) and rv == SENTINEL:
                 self.__done = True
+                self.__cleanup()
                 raise StopIteration()
             return rv
 
