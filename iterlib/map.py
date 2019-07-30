@@ -140,7 +140,7 @@ class GeneratorStream:
         A parallel map operating on non-indexable generators.
         Specify `mode` to determine whether the map will use processes or threads.
 
-        This will start `num_workers + 1` workers - one worker is necessary to distribute work because the iterables
+        This will start `num_workers` workers of the specified type, plus 1 thread which is necessary to distribute work because the iterables
         may not be indexable.
 
         Every other worker will store `buffer_size` completed results.  
@@ -174,7 +174,7 @@ class GeneratorStream:
             self.__workers += [executor(target=self.__work, args=(i,))]
             self.__workers[-1].start()
 
-        self.__distributor = executor(target=self.__distribute)
+        self.__distributor = Thread(target=self.__distribute)
         self.__distributor.start()
 
         self.__read_lock = Lock()
@@ -203,6 +203,7 @@ class GeneratorStream:
             queue_i = i % self.__num_workers
             self.__input_queues[queue_i].put(vals)
         for i in range(self.__num_workers):
+            self.__input_queues[queue_i].put(SENTINEL)
             self.__input_queues[queue_i].put(SENTINEL)
 
     def __iter__(self):
