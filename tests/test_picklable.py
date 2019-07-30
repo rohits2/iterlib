@@ -8,6 +8,7 @@ class Unpicklable:
         self.func2 = lambda x: q*x
         self.q = q
 
+@pytest.mark.timeout(10)
 def test_thread_map_pickle():
     TEST_VAL = 5
     objs = [Unpicklable(random.randint(0, 1000)) for _ in range(100)]
@@ -17,6 +18,7 @@ def test_thread_map_pickle():
         assert orig.func1(TEST_VAL) == mapped.func1(TEST_VAL)
         assert orig.func2(TEST_VAL) == mapped.func2(TEST_VAL)
 
+@pytest.mark.timeout(10)
 def test_thread_preload_pickle():
     TEST_VAL = 5
     objs = [Unpicklable(random.randint(0, 1000)) for _ in range(100)]

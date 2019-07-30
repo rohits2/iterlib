@@ -30,6 +30,6 @@ setup(
     install_requires=["loguru"],
     extras_require={
         "dev": ["check-manifest"],
-        "test": ["coveralls", "pytest-cov", "pydocstyle"],
+        "test": ["coveralls", "pytest-cov", "pydocstyle", "pytest-timeout"],
     },
 )

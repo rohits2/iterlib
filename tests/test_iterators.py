@@ -2,6 +2,7 @@ import pytest
 import iterlib
 import random
 
+@pytest.mark.timeout(10)
 def test_map_index_equality():
     random_ints = [random.randint(0, 100) for _ in range(10000)]
     random_ints_sq = [x**2 for x in random_ints]
@@ -11,6 +12,7 @@ def test_map_index_equality():
         assert random_ints_sq[i] == random_ints_proc_map[i]
         assert random_ints_sq[i] == random_ints_thread_map[i]
 
+@pytest.mark.timeout(10)
 def test_thread_map_order_equality():
     random_ints = [random.randint(0, 100) for _ in range(10000)]
     random_ints_sq = [x**2 for x in random_ints]
@@ -18,6 +20,7 @@ def test_thread_map_order_equality():
     for i, j in zip(random_ints_sq, random_ints_thread_map):
         assert i == j
 
+@pytest.mark.timeout(10)
 def test_process_map_order_equality():
     random_ints = [random.randint(0, 100) for _ in range(10000)]
     random_ints_sq = [x**2 for x in random_ints]
