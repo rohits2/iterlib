@@ -1,5 +1,7 @@
 from typing import Iterator
-from multiprocessing import cpu_count, Lock, Queue, Manager, Process
+from multiprocessing import cpu_count, Lock, Manager, Process
+from multiprocessing import Queue as PicklingQueue
+from queue import Queue
 from threading import Thread
 from loguru import logger
 
@@ -7,7 +9,7 @@ SENTINEL = "ITERLIB_STREAMING_MAP_SENTINEL"
 
 
 class IndexedStream:
-    def __init__(self, func, *iters, executor=Thread, num_workers=4, buffer_size=16, verbose=False):
+    def __init__(self, func, *iters, mode="thread", num_workers=4, buffer_size=16, verbose=False):
         assert buffer_size >= 1, "Buffer size must be greater than or equal to 1!"
         assert num_workers >= 1, "Num workers must be greater than or equal to 1!"
 
@@ -18,8 +20,16 @@ class IndexedStream:
 
         self.__num_workers = num_workers
         self.__buffer_size = buffer_size
+        if mode == "thread":
+            executor = Thread
+            queue = Queue
+        elif mode == "process":
+            executor = Process
+            queue = PicklingQueue
+        else:
+            raise ValueError("Expected either 'thread' or 'process' - you chose %s" % mode)
 
-        self.__worker_queues = [Queue(buffer_size) for _ in range(num_workers)]
+        self.__worker_queues = [queue(buffer_size) for _ in range(num_workers)]
         self.__workers = []
         for i in range(num_workers):
             self.__workers += [executor(target=self.__work, args=(i,))]
@@ -72,9 +82,13 @@ class IndexedStream:
 
 
 class IndexedMap:
-    def __init__(self, func, *iters, executor=Thread, num_workers=4, buffer_size=16, verbose=False):
+    def __init__(self, func, *iters, mode="thread", num_workers=4, buffer_size=16, verbose=False):
         assert buffer_size >= 1, "Buffer size must be greater than or equal to 1!"
         assert num_workers >= 1, "Num workers must be greater than or equal to 1!"
+
+        if mode not in ["thread", "process"]:
+            raise ValueError("Expected either 'thread' or 'process' - you chose %s" % mode)
+
 
         self.__func = func
         self.__iters = iters
@@ -83,7 +97,7 @@ class IndexedMap:
         self.__num_workers = num_workers
         self.__buffer_size = buffer_size
 
-        self.__executor = executor
+        self.__mode = mode
         self.__verbose = verbose
 
     def __len__(self):
@@ -96,13 +110,13 @@ class IndexedMap:
         return IndexedStream(
             self.__func,
             *self.__iters,
-            executor=self.__executor,
+            mode=self.__mode,
             num_workers=self.__num_workers,
             buffer_size=self.__buffer_size,
             verbose=self.__verbose)
 
 class GeneratorStream:
-    def __init__(self, func, *iters, executor=Thread, num_workers=4, buffer_size=16, verbose=False):
+    def __init__(self, func, *iters, mode="thread", num_workers=4, buffer_size=16, verbose=False):
         assert buffer_size >= 1, "Buffer size must be greater than or equal to 1!"
         assert num_workers >= 1, "Num workers must be greater than or equal to 1!"
 
@@ -113,8 +127,17 @@ class GeneratorStream:
         self.__num_workers = num_workers
         self.__buffer_size = buffer_size
 
-        self.__input_queues = [Queue(buffer_size) for _ in range(num_workers)]
-        self.__worker_queues = [Queue(buffer_size) for _ in range(num_workers)]
+        if mode == "thread":
+            executor = Thread
+            queue = Queue
+        elif mode == "process":
+            executor = Process
+            queue = PicklingQueue
+        else:
+            raise ValueError("Expected either 'thread' or 'process' - you chose %s" % mode)
+
+        self.__input_queues = [queue(buffer_size) for _ in range(num_workers)]
+        self.__worker_queues = [queue(buffer_size) for _ in range(num_workers)]
         self.__workers = []
         for i in range(num_workers):
             self.__workers += [executor(target=self.__work, args=(i,))]
@@ -177,9 +200,9 @@ def thread_map(func, *iters, num_workers=4, buffer_size=16, verbose=False):
         use_indexing = use_indexing and hasattr(itr, "__getitem__")
 
     if use_indexing:
-        return IndexedMap(func, *iters, executor=Thread, num_workers=num_workers, buffer_size=16, verbose=verbose)
+        return IndexedMap(func, *iters, mode="thread", num_workers=num_workers, buffer_size=16, verbose=verbose)
     else:
-        return GeneratorStream(func, *iters, executor=Thread, num_workers=num_workers, buffer_size=buffer_size, verbose=verbose)
+        return GeneratorStream(func, *iters, mode="thread", num_workers=num_workers, buffer_size=buffer_size, verbose=verbose)
 
 
 def process_map(func, *iters, num_workers=4, buffer_size=16, verbose=False):
@@ -188,6 +211,6 @@ def process_map(func, *iters, num_workers=4, buffer_size=16, verbose=False):
         use_indexing = use_indexing and hasattr(itr, "__getitem__")
 
     if use_indexing:
-        return IndexedMap(func, *iters, executor=Process, num_workers=num_workers, buffer_size=16, verbose=verbose)
+        return IndexedMap(func, *iters, mode="process", num_workers=num_workers, buffer_size=16, verbose=verbose)
     else:
-        return GeneratorStream(func, *iters, executor=Process, num_workers=num_workers, buffer_size=buffer_size, verbose=verbose)
+        return GeneratorStream(func, *iters, mode="process", num_workers=num_workers, buffer_size=buffer_size, verbose=verbose)

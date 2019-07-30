@@ -1,5 +1,7 @@
 from threading import Thread
-from multiprocessing import Process, Queue, Lock
+from multiprocessing import Process, Lock
+from multiprocessing import Queue as PicklingQueue
+from queue import Queue
 
 from typing import Iterator
 
@@ -9,14 +11,15 @@ class Preloader:
     def __init__(self, input_iter: Iterator, max_buf=4, verbose=False, mode="thread"):
         assert max_buf >= 1, "Buffer size must be greater than or equal to 1!"
         self.__in_iter = iter(input_iter)
-        self.__out_queue = Queue(max_buf)
         self.__done = False
         self.__read_lock = Lock()
         self.__verbose = verbose
         if mode == "thread":
+            self.__out_queue = Queue(max_buf)
             self.__worker = Thread(target=self.__work)
             self.__worker.start()
         elif mode == "process":
+            self.__out_queue = PicklingQueue(max_buf)
             self.__worker = Process(target=self.__work)
             self.__worker.start()
 
