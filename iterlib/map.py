@@ -73,7 +73,7 @@ class IndexedStream:
             if self.__verbose:
                 logger.debug("Requested item from subqueue %s which currently contains %s items" % (queue_i, self.__worker_queues[queue_i].qsize()))
             rv = self.__worker_queues[queue_i].get()
-            if rv == SENTINEL:
+            if type(rv) == type(SENTINEL) and rv == SENTINEL:
                 logger.debug("Detected termination object in subqueue %s, ending iteration")
                 self.__done = True
                 raise StopIteration()
@@ -185,7 +185,7 @@ class GeneratorStream:
             if self.__verbose:
                 logger.debug("Requested item from subqueue %s which currently contains %s items" % (queue_i, self.__worker_queues[queue_i].qsize()))
             rv = self.__worker_queues[queue_i].get()
-            if rv == SENTINEL:
+            if type(rv) == type(SENTINEL) and rv == SENTINEL:
                 logger.debug("Detected termination object in subqueue %s, ending iteration")
                 self.__done = True
                 raise StopIteration()

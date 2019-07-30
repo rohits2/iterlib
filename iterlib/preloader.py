@@ -36,7 +36,7 @@ class Preloader:
             if self.__done:
                 raise StopIteration()
             rv = self.__out_queue.get()
-            if rv == SENTINEL:
+            if type(rv) == type(SENTINEL) and rv == SENTINEL:
                 self.__done = True
                 raise StopIteration()
             return rv
