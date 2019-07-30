@@ -13,7 +13,7 @@ with open("README.md", "r") as fh:
 
 setup(
     name="iterlib",
-    version="1.1.3",
+    version="1.1.4",
     description="Parallel and concurrent iterators",
     long_description=long_description,
     classifiers=[
