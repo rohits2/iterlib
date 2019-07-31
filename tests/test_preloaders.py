@@ -11,6 +11,7 @@ def test_thread_loader_equality():
     for i, v in enumerate(random_ints_thread_loader):
         assert random_ints_sq_list[i] == v
 
+
 @pytest.mark.timeout(10)
 def test_process_loader_equality():
     random_ints = [random.randint(0, 100) for _ in range(10000)]
