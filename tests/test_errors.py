@@ -36,6 +36,6 @@ def test_process_map_exception():
     random_ints = [1 for _ in range(1000)] + [0] + [1 for _ in range(1000)]
     random_ints_inv = iterlib.process_map(lambda x: 1.0/x, random_ints)
     random_ints_proc_loader = iter(random_ints_inv)
-    with pytest.raises(Exception):
+    with pytest.raises(ZeroDivisionError):
         inv_ints = list(random_ints_proc_loader)
     assert wait_until_shutdown(random_ints_proc_loader)
