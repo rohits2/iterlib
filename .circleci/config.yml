@@ -66,6 +66,7 @@ jobs:
       - run:
           name: Move Coverage Report
           command: |
+            pwd
             mkdir test-reports
             mv .coverage test-reports
 
