@@ -61,7 +61,7 @@ jobs:
           name: run coverage report on tests
           command: |
             . venv/bin/activate
-            pytest --cov=tests .
+            pytest --cov=tests . 
 
       - store_artifacts:
           path: test-reports
