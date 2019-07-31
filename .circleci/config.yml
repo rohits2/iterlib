@@ -28,14 +28,14 @@ jobs:
             - v1-dependencies-
 
       - run:
-          name: install dependencies
+          name: Install Dependencies
           command: |
             python3 -m venv venv
             . venv/bin/activate
             pip install -r requirements.txt
 
       - run:
-          name: install iterlib
+          name: Install Iterlib
           command: |
             python3 -m venv venv
             . venv/bin/activate
@@ -52,16 +52,22 @@ jobs:
       # https://pytest.org
       # https://nose.readthedocs.io
       - run:
-          name: run tests
+          name: Run Tests
           command: |
             . venv/bin/activate
             pytest .
 
       - run:
-          name: run coverage report on tests
+          name: Run Coverage Report on Tests
           command: |
             . venv/bin/activate
             pytest --cov=tests . 
+
+      - run:
+          name: Move Coverage Report
+          command: |
+            mkdir test-reports
+            mv .coverage test-reports
 
       - store_artifacts:
           path: test-reports
