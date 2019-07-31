@@ -48,7 +48,7 @@ jobs:
           name: run tests
           command: |
             . venv/bin/activate
-            cd repo
+            ls -la
             pytest .
 
       - store_artifacts:
