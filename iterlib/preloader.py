@@ -3,12 +3,11 @@ from multiprocessing import Process, Lock, Value
 from multiprocessing import Queue as PicklingQueue
 from multiprocessing.queues import Empty as PicklingQueueEmpty
 from queue import Queue, Empty
-
 from typing import Iterator
 
 from loguru import logger
 
-SENTINEL = "ITERLIB_PRELOADER_SENTINEL"
+from .common import IterlibException, STREAMING_SENTINEL, DUMMY_VALUE
 
 
 class Preloader:
@@ -32,12 +31,10 @@ class Preloader:
         self.__mode = mode
         if mode == "thread":
             self.__out_queue = Queue(buffer_size)
-            self.__error_queue = Queue()
             self.__worker = Thread(target=self.__work)
             self.__worker.start()
         elif mode == "process":
             self.__out_queue = PicklingQueue(buffer_size)
-            self.__error_queue = PicklingQueue()
             self.__worker = Process(target=self.__work)
             self.__worker.start()
         else:
@@ -52,13 +49,13 @@ class Preloader:
                     logger.info("Preloaded one item")
         except Exception as ex:
             self.__error.value = 1
-            self.__error_queue.put(ex)
-            raise ex
+            iex = IterlibException([ex])
+            self.__out_queue.put(iex)
         finally:
             if self.__verbose:
                 logger.info("Preloader shutting down")
             self.__terminated.value = 1
-            self.__out_queue.put(SENTINEL)
+            self.__out_queue.put(STREAMING_SENTINEL)
             if self.__verbose:
                 logger.info("Preloader shut down")
 
@@ -67,14 +64,15 @@ class Preloader:
 
     def __next__(self):
         with self.__read_lock:
-            if self.__error.value:
-                exc = self.__error_queue.get()
-                logger.info("FOUND EXC IN QUEUE")
-                raise exc
             if self.__done.value:
                 raise StopIteration()    
             rv = self.__out_queue.get()
-            if type(rv) == type(SENTINEL) and rv == SENTINEL:
+            if type(rv) == IterlibException:
+                if self.__verbose:
+                    logger.info("Detected IterlibException, stopping iterator")
+                self.__done.value = 1
+                raise rv.exceptions[0]
+            if type(rv) == type(STREAMING_SENTINEL) and rv == STREAMING_SENTINEL:
                 if self.__verbose:
                     logger.info("Detected termination sentinel, stopping iterator")
                 self.__done.value = 1

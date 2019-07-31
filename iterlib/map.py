@@ -1,32 +1,13 @@
 from typing import Iterator
 from multiprocessing import cpu_count, Lock, Manager, Process, Value
 from multiprocessing import Queue as PicklingQueue
-from multiprocessing.queues import Empty as PicklingQueueEmpty
-from multiprocessing.queues import Full as PicklingQueueFull
 from queue import Queue, Empty, Full
 from threading import Thread
 
 from loguru import logger
 
-SENTINEL = "ITERLIB_STREAMING_MAP_SENTINEL"
+from .common import MAP_SENTINEL, DUMMY_VALUE, fill_queue, drain_queue, IterlibException
 
-def empty_queue(queue):
-    try:
-        while True:
-            queue.get_nowait()
-    except PicklingQueueEmpty:
-        return
-    except Empty:
-        return
-
-def fillnone_queue(queue):
-    try:
-        while True:
-            queue.put_nowait(None)
-    except PicklingQueueFull:
-        return
-    except Full:
-        return
 
 class IndexedMap:
     def __init__(self, func, *iters, mode="thread", num_workers=4, buffer_size=16, verbose=False):
@@ -118,7 +99,6 @@ class MapStream:
 
         self.__input_queues = [queue(buffer_size) for _ in range(num_workers)]
         self.__output_queues = [queue(buffer_size) for _ in range(num_workers)]
-        self.__error_queue = queue()
 
         self.__workers = []
         for i in range(num_workers):
@@ -134,12 +114,13 @@ class MapStream:
 
         in_queue = self.__input_queues[mod]
         out_queue = self.__output_queues[mod]
-        error_queue = self.__error_queue
 
         try:
-            for x in iter(in_queue.get, SENTINEL):
+            for x in iter(in_queue.get, MAP_SENTINEL):
                 if self.__error.value:
-                    raise IOError("Worker %s detected an error in another worker!" % mod)
+                    break
+                if type(x) == type(DUMMY_VALUE) and x == DUMMY_VALUE:
+                    continue
                 out_queue.put(self.__func(*x))
                 if self.__verbose:
                     logger.debug("Worker %s completed one map" % mod)
@@ -147,15 +128,15 @@ class MapStream:
             if self.__verbose:
                 logger.debug("Worker %s is shutting down" % mod)
 
-            out_queue.put(SENTINEL)
+            out_queue.put(MAP_SENTINEL)
         except Exception as ex:
             if self.__verbose:
                 logger.warning("Detected error in worker %s: %s" % (mod, ex))
             self.__error.value = 1
-            error_queue.put(ex)
-            empty_queue(in_queue)
-            fillnone_queue(out_queue)
-            raise ex
+            iex = IterlibException([ex])
+            drain_queue(out_queue)
+            out_queue.put(iex)
+            drain_queue(in_queue)
         finally:
             with self.__control_lock:
                 self.__running_workers.value -= 1
@@ -167,35 +148,36 @@ class MapStream:
         try:
             for i, vals in enumerate(zip(*self.__iters)):
                 if self.__error.value:
-                    raise IOError("Distributor has detected error in another worker!")
+                    break
                 queue_i = i % self.__num_workers
                 self.__input_queues[queue_i].put(vals)
             for queue_i in range(self.__num_workers):
                 if self.__error.value:
-                    raise IOError("Distributor has detected error in another worker!")
-                self.__input_queues[queue_i].put(SENTINEL)
+                    break
+                self.__input_queues[queue_i].put(MAP_SENTINEL)
         except Exception as ex:
             self.__error.value = 1
-            self.__error_queue.put(ex)
-            raise ex
+            iex = IterlibException([ex])
+            for in_queue, out_queue in zip(self.__input_queues, self.__output_queues):
+                drain_queue(out_queue)
+                out_queue.put(iex)
+                fill_queue(in_queue, DUMMY_VALUE)
 
     def __iter__(self):
         return self
 
     def __next__(self):
         with self.__read_lock:
-            if self.__error.value:
-                self.__done.value = 1
-                if self.__verbose:
-                    logger.warning("Detected error! Raising exception and done flag (there are %s workers that have not yet shut down)" % self.__running_workers.value)
-                raise self.__error_queue.get()
             if self.__done.value:
                 raise StopIteration()
             queue_i = self.__i.value % self.__num_workers
             if self.__verbose:
                 logger.debug("Requested item from subqueue %s which currently contains %s items" % (queue_i, self.__output_queues[queue_i].qsize()))
             rv = self.__output_queues[queue_i].get()
-            if type(rv) == type(SENTINEL) and rv == SENTINEL:
+            if type(rv) == IterlibException:
+                self.__done.value = 1
+                raise rv.exceptions[0]
+            if type(rv) == type(MAP_SENTINEL) and rv == MAP_SENTINEL:
                 logger.debug("Detected termination object in subqueue %s, ending iteration" % queue_i)
                 self.__done.value = 1
                 raise StopIteration()
@@ -207,15 +189,9 @@ class MapStream:
         for queue_i, worker in enumerate(self.__workers):
             if not worker.is_alive():
                 continue
-            try:
-                while True:
-                    self.__output_queues[queue_i].get()
-            except: pass
-            try:
-                while True:
-                    self.__input_queues[queue_i].get()
-            except: pass
-            self.__input_queues[queue_i].put(SENTINEL)
+            drain_queue(self.__output_queues[queue_i])
+            drain_queue(self.__input_queues[queue_i])
+            self.__input_queues[queue_i].put(MAP_SENTINEL)
             worker.join()
         self.__running_workers.value = 0
     
