@@ -2,6 +2,10 @@
 
 A library for easy iterator-based concurrency and parallelism.
 
+| Build Status |
+|--------------|
+|[![CircleCI](https://circleci.com/gh/rohits2/iterlib.svg?style=svg)](https://circleci.com/gh/rohits2/iterlib)|
+
 ## What is this?
 
 Have you ever been working with `map` or a generator and gotten annoyed with how slow lazy evaluation made some tasks?
