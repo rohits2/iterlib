@@ -31,7 +31,7 @@ def test_thread_map_exception():
         inv_ints = list(random_ints_thread_loader)
     assert wait_until_shutdown(random_ints_thread_loader)
 
-"""@pytest.mark.timeout(10)
+@pytest.mark.timeout(10)
 def test_process_map_exception():
     random_ints = [1 for _ in range(1000)] + [0] + [1 for _ in range(1000)]
     random_ints_inv = iterlib.process_map(lambda x: 1.0/x, random_ints)
@@ -39,4 +39,3 @@ def test_process_map_exception():
     with pytest.raises(Exception):
         inv_ints = list(random_ints_proc_loader)
     assert wait_until_shutdown(random_ints_proc_loader)
-    """
