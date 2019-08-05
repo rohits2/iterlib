@@ -25,7 +25,7 @@ def test_process_loader_exception():
 @pytest.mark.timeout(10)
 def test_thread_map_exception():
     random_ints = [1 for _ in range(1000)] + [0] + [1 for _ in range(1000)]
-    random_ints_inv = iterlib.thread_map(lambda x: 1.0/x, random_ints, num_workers=128)
+    random_ints_inv = iterlib.thread_map(lambda x: 1.0/x, random_ints, num_workers=32)
     random_ints_thread_loader = iter(random_ints_inv)
     with pytest.raises(ZeroDivisionError):
         inv_ints = list(random_ints_thread_loader)
@@ -34,7 +34,7 @@ def test_thread_map_exception():
 @pytest.mark.timeout(10)
 def test_process_map_exception():
     random_ints = [1 for _ in range(1000)] + [0] + [1 for _ in range(1000)]
-    random_ints_inv = iterlib.process_map(lambda x: 1.0/x, random_ints, num_workers=128)
+    random_ints_inv = iterlib.process_map(lambda x: 1.0/x, random_ints, num_workers=32)
     random_ints_proc_loader = iter(random_ints_inv)
     with pytest.raises(ZeroDivisionError):
         inv_ints = list(random_ints_proc_loader)
