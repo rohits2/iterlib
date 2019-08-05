@@ -123,27 +123,28 @@ class MapStream:
             for x in iter(in_queue.get, MAP_SENTINEL):
                 if type(x) == type(ERROR_SENTINEL) and x == ERROR_SENTINEL:
                     if self.__verbose:
-                        logger.debug("Worker %s recieved an error sentinel" % mod)
+                        logger.debug("Worker %s recieved an error sentinel and is shutting down" % mod)
                     out_queue.put(ERROR_SENTINEL)
                     break
                 out_queue.put(self.__func(*x))
                 if self.__verbose:
                     logger.debug("Worker %s completed one map" % mod)
-
-            if self.__verbose:
-                logger.debug("Worker %s is shutting down" % mod)
-
-            out_queue.put(MAP_SENTINEL)
+            else:
+                if self.__verbose:
+                    logger.debug("Worker %s is shutting down without an error" % mod)
+                out_queue.put(MAP_SENTINEL)
         except Exception as ex:
             if self.__verbose:
                 logger.warning("Detected error in worker %s: %s" % (mod, ex))
             iex = IterlibException([ex])
+            drain_queue(out_queue)
+            drain_queue(in_queue)
             out_queue.put(iex)
         finally:
             with self.__control_lock:
                 self.__running_workers.value -= 1
-            if self.__verbose:
-                logger.debug("Worker %s has shut down - there are now %s workers left" % (mod, self.__running_workers.value))
+                if self.__verbose:
+                    logger.debug("Worker %s has shut down - there are now %s workers left" % (mod, self.__running_workers.value))
             
     def __inject_error(self):
         for in_queue, out_queue in zip(self.__input_queues, self.__output_queues):
@@ -155,19 +156,20 @@ class MapStream:
         try:
             for i, vals in enumerate(zip(*self.__iters)):
                 if self.__error.value:
+                    self.__inject_error()
                     break
                 queue_i = i % self.__num_workers
                 self.__input_queues[queue_i].put(vals)
-            for queue_i in range(self.__num_workers):
-                if self.__error.value:
-                    break
-                self.__input_queues[queue_i].put(MAP_SENTINEL)
         except Exception as ex:
             iex = IterlibException([ex])
             for in_queue, out_queue in zip(self.__input_queues, self.__output_queues):
                 drain_queue(out_queue)
                 out_queue.put(iex)
+                drain_queue(in_queue)
                 fill_queue(in_queue, ERROR_SENTINEL)
+        finally:
+            for queue_i in range(self.__num_workers):
+                self.__input_queues[queue_i].put(MAP_SENTINEL)
 
     def __accumulate(self):
         while not self.__done.value:
@@ -179,7 +181,6 @@ class MapStream:
             if type(rv) == IterlibException:
                 self.__done.value = 1
                 self.__error.value = 1
-                self.__inject_error()
                 self.__final_queue.put(rv)
                 continue
             if type(rv) == type(MAP_SENTINEL) and rv == MAP_SENTINEL:
@@ -189,7 +190,12 @@ class MapStream:
             self.__final_queue.put(rv)
             with self.__control_lock:
                 self.__i.value += 1
-
+        if self.__verbose:
+            logger.debug("Accumulator is shutting down" % queue_i)
+        while self.__running_workers.value > 0:
+            print(self.__running_workers.value)
+            for out_queue in self.__output_queues:
+                drain_queue(out_queue)
 
     def __iter__(self):
         return self
