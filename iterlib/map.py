@@ -193,7 +193,6 @@ class MapStream:
         if self.__verbose:
             logger.debug("Accumulator is shutting down" % queue_i)
         while self.__running_workers.value > 0:
-            print(self.__running_workers.value)
             for out_queue in self.__output_queues:
                 drain_queue(out_queue)
 
