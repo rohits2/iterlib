@@ -31,11 +31,11 @@ class Preloader:
         self.__mode = mode
         if mode == "thread":
             self.__out_queue = Queue(buffer_size)
-            self.__worker = Thread(target=self.__work)
+            self.__worker = Thread(target=self.__work, daemon=True)
             self.__worker.start()
         elif mode == "process":
             self.__out_queue = PicklingQueue(buffer_size)
-            self.__worker = Process(target=self.__work)
+            self.__worker = Process(target=self.__work, daemon=True)
             self.__worker.start()
         else:
             raise ValueError("Expected either 'thread' or 'process' - you chose %s" % mode)
