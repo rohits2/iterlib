@@ -3,6 +3,7 @@ from multiprocessing import cpu_count, Lock, Manager, Process, Value
 from multiprocessing import Queue as PicklingQueue
 from queue import Queue, Empty, Full
 from threading import Thread
+from time import sleep
 
 from loguru import logger
 
@@ -98,18 +99,18 @@ class MapStream:
             raise ValueError("Expected either 'thread' or 'process' - you chose %s" % mode)
 
         self.__input_queues = [queue(2) for _ in range(num_workers)]
-        self.__output_queues = [queue(1) for _ in range(num_workers)]
+        self.__output_queues = [queue(2) for _ in range(num_workers)]
         self.__final_queue = queue(buffer_size)
 
         self.__workers = []
         for i in range(num_workers):
-            self.__workers += [executor(target=self.__work, args=(i,))]
+            self.__workers += [executor(target=self.__work, args=(i,), daemon=True)]
             self.__workers[-1].start()
 
-        self.__distributor = Thread(target=self.__distribute)
+        self.__distributor = Thread(target=self.__distribute, daemon=True)
         self.__distributor.start()
 
-        self.__accumulator = Thread(target=self.__accumulate)
+        self.__accumulator = Thread(target=self.__accumulate, daemon=True)
         self.__accumulator.start()
 
     def __work(self, mod):
@@ -190,12 +191,20 @@ class MapStream:
             self.__final_queue.put(rv)
             with self.__control_lock:
                 self.__i.value += 1
-        if self.__verbose:
-            logger.debug("Accumulator is shutting down" % queue_i)
-        while self.__running_workers.value > 0:
-            for out_queue in self.__output_queues:
-                drain_queue(out_queue)
 
+        if self.__verbose:
+            logger.debug("Accumulator is waiting for workers to shut down..." % queue_i)
+
+        while True:
+            with self.__control_lock:
+                if self.__running_workers.value == 0: break
+            sleep(0)
+            for in_queue, out_queue in zip(self.__input_queues, self.__output_queues):
+                fill_queue(in_queue, MAP_SENTINEL)
+                drain_queue(out_queue)
+        if self.__verbose:
+            logger.debug("Accumulator shut down." % queue_i)
+            
     def __iter__(self):
         return self
 
@@ -205,6 +214,7 @@ class MapStream:
             self.__final_queue.put(MAP_SENTINEL)
             raise StopIteration
         if type(rv) == IterlibException:
+            self.__final_queue.put(MAP_SENTINEL)
             raise rv.exceptions[0]
         return rv
 
