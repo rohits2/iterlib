@@ -33,8 +33,8 @@ def test_thread_map_cleanup():
 
 @pytest.mark.timeout(10)
 def test_process_map_cleanup():
-    random_ints = [random.randint(0, 100) for _ in range(100000)]
-    random_ints_process_map = iter(iterlib.process_map(lambda x: x, random_ints, num_workers=128))
+    random_ints = [random.randint(0, 100) for _ in range(10000)]
+    random_ints_process_map = iter(iterlib.process_map(lambda x: x, random_ints, num_workers=32))
     random_ints_process_list = list(random_ints_process_map)
     assert random_ints == random_ints_process_list
     assert wait_until_shutdown(random_ints_process_map)
