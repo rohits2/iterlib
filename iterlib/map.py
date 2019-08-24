@@ -1,7 +1,7 @@
 from typing import Iterator
 from multiprocessing import cpu_count, Lock, Manager, Process, Value
 from multiprocessing import Queue as PicklingQueue
-from queue import Queue, Empty, Full
+from .queue import Queue, InputClosed, OutputClosed, QueueEmpty
 from threading import Thread
 from time import sleep
 
@@ -85,7 +85,6 @@ class MapStream:
         self.__read_lock = Lock()
         self.__control_lock = Lock()
         self.__running_workers = Value("i", num_workers)
-        self.__done = Value("i", 0)
         self.__error = Value("i", 0)
         self.__i = Value("i", 0)
 
@@ -98,8 +97,8 @@ class MapStream:
         else:
             raise ValueError("Expected either 'thread' or 'process' - you chose %s" % mode)
 
-        self.__input_queues = [queue(2) for _ in range(num_workers)]
-        self.__output_queues = [queue(2) for _ in range(num_workers)]
+        self.__input_queues = [queue(1) for _ in range(num_workers)]
+        self.__output_queues = [queue(1) for _ in range(num_workers)]
         self.__final_queue = queue(buffer_size)
 
         self.__workers = []
@@ -121,111 +120,89 @@ class MapStream:
         out_queue = self.__output_queues[mod]
 
         try:
-            for x in iter(in_queue.get, MAP_SENTINEL):
-                if type(x) == type(ERROR_SENTINEL) and x == ERROR_SENTINEL:
-                    if self.__verbose:
-                        logger.debug("Worker %s recieved an error sentinel and is shutting down" % mod)
-                    out_queue.put(ERROR_SENTINEL)
-                    break
+            for x in in_queue:
                 out_queue.put(self.__func(*x))
                 if self.__verbose:
                     logger.debug("Worker %s completed one map" % mod)
             else:
                 if self.__verbose:
                     logger.debug("Worker %s is shutting down without an error" % mod)
-                out_queue.put(MAP_SENTINEL)
+                
+        except InputClosed:
+            logger.debug("Worker %s is shutting down because the output queue is not accepting additional data" % mod)
         except Exception as ex:
             if self.__verbose:
                 logger.warning("Detected error in worker %s: %s" % (mod, ex))
-            iex = IterlibException([ex])
-            drain_queue(out_queue)
-            drain_queue(in_queue)
-            out_queue.put(iex)
+            out_queue.set_error(ex)
         finally:
+            out_queue.close_input()
             with self.__control_lock:
                 self.__running_workers.value -= 1
                 if self.__verbose:
                     logger.debug("Worker %s has shut down - there are now %s workers left" % (mod, self.__running_workers.value))
-            
-    def __inject_error(self):
-        for in_queue, out_queue in zip(self.__input_queues, self.__output_queues):
-            drain_queue(in_queue)
-            in_queue.put(ERROR_SENTINEL)
-            drain_queue(out_queue)
     
     def __distribute(self):
         try:
             for i, vals in enumerate(zip(*self.__iters)):
-                if self.__error.value:
-                    self.__inject_error()
-                    break
                 queue_i = i % self.__num_workers
                 self.__input_queues[queue_i].put(vals)
+        except InputClosed:
+            pass
         except Exception as ex:
-            iex = IterlibException([ex])
-            for in_queue, out_queue in zip(self.__input_queues, self.__output_queues):
-                drain_queue(out_queue)
-                out_queue.put(iex)
-                drain_queue(in_queue)
-                fill_queue(in_queue, ERROR_SENTINEL)
-        finally:
+            if self.__verbose:
+                logger.debug("Distributor encountered an error!")
+            self.__output_queues[queue_i].set_error(ex)
             for queue_i in range(self.__num_workers):
-                self.__input_queues[queue_i].put(MAP_SENTINEL)
+                self.__input_queues[queue_i].close_output()
+        finally:
+            if self.__verbose:
+                logger.debug("Distributor shutting down and closing input queues...")
+            for queue_i in range(self.__num_workers):
+                self.__input_queues[queue_i].close_input()
 
     def __accumulate(self):
-        while not self.__done.value:
+        while not self.__final_queue.input_closed:
             with self.__control_lock:
                 queue_i = self.__i.value % self.__num_workers
             if self.__verbose:
-                logger.debug("Requested item from subqueue %s which currently contains %s items" % (queue_i, self.__output_queues[queue_i].qsize()))
-            rv = self.__output_queues[queue_i].get()
-            if type(rv) == IterlibException:
-                self.__done.value = 1
-                self.__error.value = 1
+                logger.debug("Requested item from subqueue %s which currently contains %s items" % (queue_i, len(self.__output_queues[queue_i])))
+            try:
+                rv = self.__output_queues[queue_i].get()
                 self.__final_queue.put(rv)
-                continue
-            if type(rv) == type(MAP_SENTINEL) and rv == MAP_SENTINEL:
+            except QueueEmpty:
                 if self.__verbose:
-                    logger.debug("Detected termination object in subqueue %s, ending iteration" % queue_i)
-                self.__done.value = 1
-            self.__final_queue.put(rv)
+                    logger.debug("Detected subqueue %s closure, ending iteration" % queue_i)
+                self.__final_queue.close_input()
+            except Exception as e:
+                if self.__verbose:
+                    logger.debug("Detected exception in subqueue %s" % queue_i)
+                self.terminate()
+                self.__final_queue.set_error(e)
             with self.__control_lock:
                 self.__i.value += 1
 
         if self.__verbose:
-            logger.debug("Accumulator is waiting for workers to shut down..." % queue_i)
-
-        while True:
-            with self.__control_lock:
-                if self.__running_workers.value == 0: break
-            sleep(0)
-            for in_queue, out_queue in zip(self.__input_queues, self.__output_queues):
-                fill_queue(in_queue, MAP_SENTINEL)
-                drain_queue(out_queue)
-        if self.__verbose:
-            logger.debug("Accumulator shut down." % queue_i)
+            self.__final_queue.close_input()
+            logger.debug("Accumulator shut down.")
             
     def __iter__(self):
         return self
 
     def __next__(self):
-        rv = self.__final_queue.get()
-        if type(rv) == type(MAP_SENTINEL) and rv == MAP_SENTINEL:
-            self.__final_queue.put(MAP_SENTINEL)
-            raise StopIteration
-        if type(rv) == IterlibException:
-            self.__final_queue.put(MAP_SENTINEL)
-            raise rv.exceptions[0]
-        return rv
+        try:
+            return self.__final_queue.get()
+        except (OutputClosed, QueueEmpty):
+            raise StopIteration()
 
     def terminate(self):
         logger.info("Terminating map!")
         for queue_i, worker in enumerate(self.__workers):
             if not worker.is_alive():
                 continue
-            drain_queue(self.__output_queues[queue_i])
-            drain_queue(self.__input_queues[queue_i])
-            self.__input_queues[queue_i].put(MAP_SENTINEL)
+            self.__output_queues[queue_i].close_output()
+            self.__output_queues[queue_i].close_input()
+            self.__input_queues[queue_i].close_input()
+            self.__input_queues[queue_i].close_output()
             worker.join()
         self.__running_workers.value = 0
     
