@@ -2,4 +2,4 @@ name = "iterlib"
 
 from .map import thread_map, process_map
 from .preloader import thread_preload, process_preload
-from .common import IterlibException
+from .common import THREAD, PROCESS

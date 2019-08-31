@@ -7,6 +7,9 @@ STREAMING_SENTINEL = "ITERLIB_PRELOADER_SENTINEL"
 ERROR_SENTINEL = "ITERLIB_ERROR_SENTINEL"
 DUMMY_VALUE = "ITERLIB_DUMMY_VALUE"
 
+THREAD = "ITERLIB_THREAD_ENUM"
+PROCESS = "ITERLIB_PROCESS_ENUM"
+
 class IterlibException(Exception):
     def __init__(self, exceptions, *args, **kwargs):
         super().__init__(args, kwargs)

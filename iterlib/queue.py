@@ -1,5 +1,9 @@
-from threading import RLock, Event, Condition
-from collections import deque
+from multiprocessing import RLock, Event, Condition, Value
+from queue import Queue as TQueue
+from multiprocessing import Queue as MQueue
+
+from .common import drain_queue, THREAD, PROCESS
+
 
 class InputClosed(Exception):
     def __init__(self):
@@ -25,25 +29,53 @@ class QueueIterator:
             raise StopIteration
 
 class Queue:
-    def __init__(self, maxsize=0):
+    def __init__(self, maxsize=0, mode=THREAD):
         self.maxsize = maxsize
-        self.queue = deque(maxlen=self.maxsize)
-        self.error = None
-        self.input_closed = False
-        self.output_closed = False
+        self.mode = mode
+
+        self.__input_closed = Value('i', 0)
+        self.__output_closed = Value('i', 0)
+        self.__has_error = Value('i', 0)
         self.mutex = RLock()
         self.not_empty = Condition(self.mutex)
         self.not_full = Condition(self.mutex)
+
+        if mode == THREAD:
+            self.queue = TQueue(maxsize=maxsize)
+            self.__error_queue = TQueue(maxsize=maxsize)
+        else:
+            self.queue = MQueue(maxsize=maxsize)
+            self.__error_queue = MQueue(maxsize=maxsize)
+            
     
     @property
     def is_empty(self):
         with self.mutex:
-            return len(self.queue) == 0
+            return self.queue.empty()
 
     @property
     def is_full(self):
         with self.mutex:
-            return len(self.queue) == self.maxsize
+            return self.queue.full()
+
+    @property
+    def input_closed(self):
+        with self.mutex:
+            return self.__input_closed.value
+
+    @property
+    def output_closed(self):
+        with self.mutex:
+            return self.__input_closed.value
+
+    @property
+    def error(self):
+        with self.mutex:
+            if not self.__has_error.value:
+                return None
+            ev = self.__error_queue.get()
+            self.__error_queue.put(ev)
+            return ev
 
     def put(self, item, block=True, timeout=None):
         with self.mutex:
@@ -54,7 +86,7 @@ class Queue:
                 raise OutputClosed()
             if self.is_full and not block:
                 return False
-            self.queue.append(item)
+            self.queue.put(item)
             self.not_empty.notify()
         return True
 
@@ -67,28 +99,29 @@ class Queue:
                 raise QueueEmpty()
             if self.output_closed:
                 raise OutputClosed()
-            rv = self.queue.popleft()
+            rv = self.queue.get()
             self.not_full.notify()
             return rv
             
     def set_error(self, exc):
         with self.mutex:
-            self.error = exc
-            self.input_closed = True
-            self.output_closed = True
-            self.queue.clear()
+            self.__error_queue.put(exc)
+            self.__has_error.value = 1
+            self.__input_closed.value= 1
+            self.__output_closed.value = 1
+            drain_queue(self.queue)
             self.not_empty.notify_all()
             self.not_full.notify_all()
 
     def close_input(self):
         with self.mutex:
-            self.input_closed = True
+            self.__input_closed.value = 1
             self.not_empty.notify_all()
             self.not_full.notify_all()
 
     def close_output(self):
         with self.mutex:
-            self.output_closed = True
+            self.__output_closed.value = 1
             self.not_empty.notify_all()
             self.not_full.notify_all()
 
@@ -97,4 +130,5 @@ class Queue:
 
     def __len__(self):
         with self.mutex:
-            return len(self.queue)
+            return self.queue.qsize()
+

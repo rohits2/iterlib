@@ -1,17 +1,17 @@
 from typing import Iterator
 from multiprocessing import cpu_count, Lock, Manager, Process, Value
-from multiprocessing import Queue as PicklingQueue
 from .queue import Queue, InputClosed, OutputClosed, QueueEmpty
 from threading import Thread
 from time import sleep
 
 from loguru import logger
 
-from .common import MAP_SENTINEL, DUMMY_VALUE, ERROR_SENTINEL, fill_queue, drain_queue, IterlibException
+from .common import THREAD, PROCESS
+from .allocator import StreamAllocator, ModulusAllocator
 
 
 class IndexedMap:
-    def __init__(self, func, *iters, mode="thread", num_workers=4, buffer_size=16, verbose=False):
+    def __init__(self, func, *iters, mode=THREAD, num_workers=4, buffer_size=16, verbose=False):
         """
         Map `func` over `iters`, where each item in `iters` supports indexing.
         This map will also support indexing, and index queries will lazy evaluate the map.
@@ -23,7 +23,7 @@ class IndexedMap:
         assert buffer_size >= 1, "Buffer size must be greater than or equal to 1!"
         assert num_workers >= 1, "Num workers must be greater than or equal to 1!"
 
-        if mode not in ["thread", "process"]:
+        if mode not in [THREAD, PROCESS]:
             raise ValueError("Expected either 'thread' or 'process' - you chose %s" % mode)
 
 
@@ -76,38 +76,31 @@ class MapStream:
         self.__buffer_size = buffer_size
 
         self.__length = float('inf')
+        self.__allocator = StreamAllocator(zip(*iters), num_workers)
         for it in iters:
             if not hasattr(it, "__len__"):
                 self.__length = None
                 break
             self.__length = min(self.__length, len(it))
 
-        self.__read_lock = Lock()
         self.__control_lock = Lock()
-        self.__running_workers = Value("i", num_workers)
-        self.__error = Value("i", 0)
-        self.__i = Value("i", 0)
+        self.__running_workers = Value("i", num_workers+1)
+        self.__i = Value("i", num_workers+1)
 
-        if mode == "thread":
+        if mode == THREAD:
             executor = Thread
-            queue = Queue
-        elif mode == "process":
+        elif mode == PROCESS:
             executor = Process
-            queue = PicklingQueue
         else:
-            raise ValueError("Expected either 'thread' or 'process' - you chose %s" % mode)
+            raise ValueError("Expected either iterlib.THREAD or iterlib.PROCESS")
 
-        self.__input_queues = [queue(1) for _ in range(num_workers)]
-        self.__output_queues = [queue(1) for _ in range(num_workers)]
-        self.__final_queue = queue(buffer_size)
+        self.__output_queues = [Queue(1, mode=mode) for _ in range(num_workers)]
+        self.__final_queue = Queue(buffer_size, mode=mode)
 
         self.__workers = []
         for i in range(num_workers):
             self.__workers += [executor(target=self.__work, args=(i,), daemon=True)]
             self.__workers[-1].start()
-
-        self.__distributor = Thread(target=self.__distribute, daemon=True)
-        self.__distributor.start()
 
         self.__accumulator = Thread(target=self.__accumulate, daemon=True)
         self.__accumulator.start()
@@ -116,11 +109,11 @@ class MapStream:
         if self.__verbose:
             logger.debug("Worker %s is starting" % mod)
 
-        in_queue = self.__input_queues[mod]
+        in_iter = self.__allocator.get_iterator(mod)
         out_queue = self.__output_queues[mod]
 
         try:
-            for x in in_queue:
+            for x in in_iter:
                 out_queue.put(self.__func(*x))
                 if self.__verbose:
                     logger.debug("Worker %s completed one map" % mod)
@@ -138,53 +131,36 @@ class MapStream:
             out_queue.close_input()
             with self.__control_lock:
                 self.__running_workers.value -= 1
-                if self.__verbose:
-                    logger.debug("Worker %s has shut down - there are now %s workers left" % (mod, self.__running_workers.value))
+            if self.__verbose:
+                logger.debug("Worker %s has shut down - there are now %s workers left" % (mod, self.__running_workers.value))
     
-    def __distribute(self):
-        try:
-            for i, vals in enumerate(zip(*self.__iters)):
-                queue_i = i % self.__num_workers
-                self.__input_queues[queue_i].put(vals)
-        except InputClosed:
-            pass
-        except Exception as ex:
-            if self.__verbose:
-                logger.debug("Distributor encountered an error!")
-            self.__output_queues[queue_i].set_error(ex)
-            for queue_i in range(self.__num_workers):
-                self.__input_queues[queue_i].close_output()
-        finally:
-            if self.__verbose:
-                logger.debug("Distributor shutting down and closing input queues...")
-            for queue_i in range(self.__num_workers):
-                self.__input_queues[queue_i].close_input()
-
     def __accumulate(self):
         while not self.__final_queue.input_closed:
-            with self.__control_lock:
-                queue_i = self.__i.value % self.__num_workers
+            queue_i = self.__i.value % self.__num_workers
             if self.__verbose:
                 logger.debug("Requested item from subqueue %s which currently contains %s items" % (queue_i, len(self.__output_queues[queue_i])))
             try:
                 rv = self.__output_queues[queue_i].get()
                 self.__final_queue.put(rv)
+                self.__i.value += 1
             except QueueEmpty:
                 if self.__verbose:
                     logger.debug("Detected subqueue %s closure, ending iteration" % queue_i)
                 self.__final_queue.close_input()
             except Exception as e:
                 if self.__verbose:
-                    logger.debug("Detected exception in subqueue %s" % queue_i)
-                self.terminate()
+                    logger.debug("Detected exception in subqueue %s, terminating workers" % queue_i)
                 self.__final_queue.set_error(e)
-            with self.__control_lock:
-                self.__i.value += 1
+                self.__final_queue.close_input()
+                self.terminate()
 
         if self.__verbose:
-            self.__final_queue.close_input()
             logger.debug("Accumulator shut down.")
-            
+        self.__final_queue.close_input()
+        
+        with self.__control_lock:
+            self.__running_workers.value -= 1
+
     def __iter__(self):
         return self
 
@@ -195,16 +171,15 @@ class MapStream:
             raise StopIteration()
 
     def terminate(self):
-        logger.info("Terminating map!")
+        if self.__verbose:
+            logger.info("Terminating map!")
         for queue_i, worker in enumerate(self.__workers):
-            if not worker.is_alive():
-                continue
             self.__output_queues[queue_i].close_output()
             self.__output_queues[queue_i].close_input()
-            self.__input_queues[queue_i].close_input()
-            self.__input_queues[queue_i].close_output()
+        for worker in self.__workers:
+            if not worker.is_alive():
+                continue
             worker.join()
-        self.__running_workers.value = 0
     
     def is_shutdown(self):
         if self.__verbose:
@@ -212,7 +187,7 @@ class MapStream:
         return self.__running_workers.value == 0
 
 class IndexedMapStream(MapStream):
-    def __init__(self, func, *iters, mode="thread", num_workers=4, buffer_size=16, verbose=False):
+    def __init__(self, func, *iters, mode=THREAD, num_workers=4, buffer_size=16, verbose=False):
         super().__init__(func, *iters, mode=mode, num_workers=num_workers, buffer_size=buffer_size, verbose=verbose)
         if self._MapStream__length is None:
             raise ValueError("This map does not have a length!")
@@ -235,9 +210,9 @@ def thread_map(func, *iters, num_workers=2, buffer_size=3, verbose=False):
         use_indexing = use_indexing and hasattr(itr, "__getitem__")
 
     if use_indexing:
-        return IndexedMap(func, *iters, mode="thread", num_workers=num_workers, buffer_size=16, verbose=verbose)
+        return IndexedMap(func, *iters, mode=THREAD, num_workers=num_workers, buffer_size=16, verbose=verbose)
     else:
-        return MapStream(func, *iters, mode="thread", num_workers=num_workers, buffer_size=buffer_size, verbose=verbose)
+        return MapStream(func, *iters, mode=THREAD, num_workers=num_workers, buffer_size=buffer_size, verbose=verbose)
 
 
 def process_map(func, *iters, num_workers=4, buffer_size=1, verbose=False):
@@ -253,6 +228,6 @@ def process_map(func, *iters, num_workers=4, buffer_size=1, verbose=False):
         use_indexing = use_indexing and hasattr(itr, "__getitem__")
 
     if use_indexing:
-        return IndexedMap(func, *iters, mode="process", num_workers=num_workers, buffer_size=16, verbose=verbose)
+        return IndexedMap(func, *iters, mode=PROCESS, num_workers=num_workers, buffer_size=16, verbose=verbose)
     else:
-        return MapStream(func, *iters, mode="process", num_workers=num_workers, buffer_size=buffer_size, verbose=verbose)
+        return MapStream(func, *iters, mode=PROCESS, num_workers=num_workers, buffer_size=buffer_size, verbose=verbose)

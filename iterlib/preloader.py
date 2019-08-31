@@ -7,11 +7,12 @@ from typing import Iterator
 
 from loguru import logger
 
-from .common import IterlibException, STREAMING_SENTINEL, DUMMY_VALUE
+from .common import IterlibException, THREAD, PROCESS
+from .queue import Queue, InputClosed, OutputClosed, QueueEmpty
 
 
 class Preloader:
-    def __init__(self, input_iter: Iterator, buffer_size=4, verbose=False, mode="thread"):
+    def __init__(self, input_iter: Iterator, buffer_size=4, verbose=False, mode=THREAD):
         """
         Preloads an iterator in the background so that queries to it return quickly.
         Specify `max_buf` to control the maximum number of values to preload.
@@ -23,18 +24,15 @@ class Preloader:
         """
         assert buffer_size >= 1, "Buffer size must be greater than or equal to 1!"
         self.__in_iter = iter(input_iter)
-        self.__done = Value("i", 0)
         self.__terminated = Value("i", 0)
-        self.__error = Value("i", 0)
         self.__read_lock = Lock()
         self.__verbose = verbose
         self.__mode = mode
-        if mode == "thread":
-            self.__out_queue = Queue(buffer_size)
+        self.__out_queue = Queue(maxsize=buffer_size, mode=mode)
+        if mode == THREAD:
             self.__worker = Thread(target=self.__work, daemon=True)
             self.__worker.start()
-        elif mode == "process":
-            self.__out_queue = PicklingQueue(buffer_size)
+        elif mode == PROCESS:
             self.__worker = Process(target=self.__work, daemon=True)
             self.__worker.start()
         else:
@@ -48,36 +46,27 @@ class Preloader:
                 if self.__verbose:
                     logger.info("Preloaded one item")
         except Exception as ex:
-            self.__error.value = 1
-            iex = IterlibException([ex])
-            self.__out_queue.put(iex)
+            if self.__verbose:
+                logger.info("Preloader encountered error")
+            self.__out_queue.set_error(ex)
         finally:
             if self.__verbose:
                 logger.info("Preloader shutting down")
-            self.__terminated.value = 1
-            self.__out_queue.put(STREAMING_SENTINEL)
+            self.__out_queue.close_input()
             if self.__verbose:
                 logger.info("Preloader shut down")
+            self.__terminated.value = 1
 
     def __iter__(self):
         return self
 
     def __next__(self):
-        with self.__read_lock:
-            if self.__done.value:
-                raise StopIteration()    
-            rv = self.__out_queue.get()
-            if type(rv) == IterlibException:
-                if self.__verbose:
-                    logger.info("Detected IterlibException, stopping iterator")
-                self.__done.value = 1
-                raise rv.exceptions[0]
-            if type(rv) == type(STREAMING_SENTINEL) and rv == STREAMING_SENTINEL:
-                if self.__verbose:
-                    logger.info("Detected termination sentinel, stopping iterator")
-                self.__done.value = 1
-                raise StopIteration()
-            return rv
+        try:
+            return self.__out_queue.get()
+        except QueueEmpty:
+            raise StopIteration()
+        except OutputClosed:
+            raise StopIteration()
 
     def is_shutdown(self, verbose=False):
         if self.__verbose or verbose:
@@ -97,7 +86,7 @@ def thread_preload(itr, buffer_size=4, verbose=False):
 
     Set max_buf to control how far in advance the iterator will preload.
     """
-    return Preloader(itr, buffer_size=buffer_size, mode="thread", verbose=verbose)
+    return Preloader(itr, buffer_size=buffer_size, mode=THREAD, verbose=verbose)
 
 
 def process_preload(itr, buffer_size=4, verbose=False):
@@ -108,4 +97,4 @@ def process_preload(itr, buffer_size=4, verbose=False):
 
     Set max_buf to control how far in advance the iterator will preload.
     """
-    return Preloader(itr, buffer_size=buffer_size, mode="process", verbose=verbose)
+    return Preloader(itr, buffer_size=buffer_size, mode=PROCESS, verbose=verbose)
